@@ -24,9 +24,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat bootstrap/itemquote.v10.part* > /tmp/item-quote.b64
-          base64 --decode /tmp/item-quote.b64 > /tmp/item-quote.tgz
-          echo "48fe49ca5fa99a67cb99a948df317a0544bbbd7f26822b2ab0270d437ce7a1b0  /tmp/item-quote.tgz" | sha256sum -c -
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64
+          import hashlib
+
+          root = Path('bootstrap')
+          parts = [(root / f'itemquote.v10.part{i:02d}').read_text() for i in range(7)]
+          expected = '48fe49ca5fa99a67cb99a948df317a0544bbbd7f26822b2ab0270d437ce7a1b0'
+          alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+          # Two uploaded chunks were each one Base64 character short. They were
+          # split on 18,000-character boundaries, so recover the omitted final
+          # character in each chunk and verify against the immutable archive hash.
+          for first in alphabet:
+              for second in alphabet:
+                  encoded = parts[0] + first + ''.join(parts[1:5]) + parts[5] + second + parts[6]
+                  try:
+                      archive = base64.b64decode(encoded, validate=True)
+                  except ValueError:
+                      continue
+                  if hashlib.sha256(archive).hexdigest() == expected:
+                      Path('/tmp/item-quote.tgz').write_bytes(archive)
+                      print('Archive reconstruction and SHA-256 verification succeeded.')
+                      raise SystemExit(0)
+
+          raise SystemExit('Unable to reconstruct an archive matching the expected SHA-256.')
+          PY
           tar -xzf /tmp/item-quote.tgz -C .
           rm -rf bootstrap
 
