@@ -20,7 +20,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Reconstruct and verify source archive
+      - name: Recover, reconstruct, and verify source archive
         shell: bash
         run: |
           set -euo pipefail
@@ -30,27 +30,58 @@ jobs:
           import hashlib
 
           root = Path('bootstrap')
-          parts = [(root / f'itemquote.v10.part{i:02d}').read_text() for i in range(7)]
-          expected = '48fe49ca5fa99a67cb99a948df317a0544bbbd7f26822b2ab0270d437ce7a1b0'
-          alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+          alphabet = b'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+          expected_blobs = {
+              0: 'f5c0e261920fad287015edeea2c2c427c6fb2f11',
+              5: '7f13147c187e1d8786c9c2e633b07db3067689a5',
+          }
 
-          # Two uploaded chunks were each one Base64 character short. They were
-          # split on 18,000-character boundaries, so recover the omitted final
-          # character in each chunk and verify against the immutable archive hash.
-          for first in alphabet:
-              for second in alphabet:
-                  encoded = parts[0] + first + ''.join(parts[1:5]) + parts[5] + second + parts[6]
-                  try:
-                      archive = base64.b64decode(encoded, validate=True)
-                  except ValueError:
-                      continue
-                  if hashlib.sha256(archive).hexdigest() == expected:
-                      Path('/tmp/item-quote.tgz').write_bytes(archive)
-                      print('Archive reconstruction and SHA-256 verification succeeded.')
-                      raise SystemExit(0)
+          def recover_one_missing_base64_byte(path: Path, expected_hex: str) -> None:
+              damaged = path.read_bytes()
+              if len(damaged) != 17_999:
+                  raise SystemExit(f'{path} has unexpected size {len(damaged)}')
 
-          raise SystemExit('Unable to reconstruct an archive matching the expected SHA-256.')
+              expected = bytes.fromhex(expected_hex)
+              git_header = b'blob 18000\0'
+              prefix_hash = hashlib.sha1(git_header)
+              view = memoryview(damaged)
+              alphabet_bytes = [bytes((value,)) for value in alphabet]
+
+              for position in range(len(damaged) + 1):
+                  suffix = view[position:]
+                  for candidate in alphabet_bytes:
+                      digest = prefix_hash.copy()
+                      digest.update(candidate)
+                      digest.update(suffix)
+                      if digest.digest() == expected:
+                          restored = damaged[:position] + candidate + damaged[position:]
+                          path.write_bytes(restored)
+                          print(f'Recovered {path.name}: inserted {candidate.decode()} at offset {position}.')
+                          return
+                  if position < len(damaged):
+                      prefix_hash.update(view[position:position + 1])
+
+              raise SystemExit(f'Could not recover {path} from its Git blob hash.')
+
+          for index, expected_hash in expected_blobs.items():
+              recover_one_missing_base64_byte(
+                  root / f'itemquote.v10.part{index:02d}', expected_hash
+              )
+
+          encoded = b''.join(
+              (root / f'itemquote.v10.part{i:02d}').read_bytes() for i in range(7)
+          )
+          archive = base64.b64decode(encoded, validate=True)
+          expected_archive = '48fe49ca5fa99a67cb99a948df317a0544bbbd7f26822b2ab0270d437ce7a1b0'
+          actual_archive = hashlib.sha256(archive).hexdigest()
+          if actual_archive != expected_archive:
+              raise SystemExit(
+                  f'Archive SHA-256 mismatch: expected {expected_archive}, got {actual_archive}'
+              )
+          Path('/tmp/item-quote.tgz').write_bytes(archive)
+          print('Archive reconstruction and SHA-256 verification succeeded.')
           PY
+          tar -tzf /tmp/item-quote.tgz >/dev/null
           tar -xzf /tmp/item-quote.tgz -C .
           rm -rf bootstrap
 
