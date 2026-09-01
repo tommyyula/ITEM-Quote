@@ -1,0 +1,45 @@
+name: Bootstrap application source
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'bootstrap/itemquote.v10.part*'
+      - '.github/workflows/bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Reconstruct and verify source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat bootstrap/itemquote.v10.part* > /tmp/item-quote.b64
+          base64 --decode /tmp/item-quote.b64 > /tmp/item-quote.tgz
+          echo "48fe49ca5fa99a67cb99a948df317a0544bbbd7f26822b2ab0270d437ce7a1b0  /tmp/item-quote.tgz" | sha256sum -c -
+          tar -xzf /tmp/item-quote.tgz -C .
+          rm -rf bootstrap
+
+      - name: Commit restored application source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+          else
+            git commit -m "Build database-backed interactive quotation app"
+            git push
+          fi
