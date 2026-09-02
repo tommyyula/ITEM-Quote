@@ -1,4 +1,4 @@
-name: Diagnose source archive corruption
+name: Restore ITEM Quote application source
 
 on:
   push:
@@ -9,21 +9,23 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnose:
+  restore:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Locate the missing Base64 character
+      - name: Recover and verify archive
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           import base64
-          import zlib
+          import gzip
+          import hashlib
 
           root = Path('bootstrap')
           parts = [(root / f'itemquote.v10.part{i:02d}').read_bytes() for i in range(7)]
@@ -31,24 +33,54 @@ jobs:
           prefix = b''.join(parts[:5])
           damaged = parts[5]
           suffix = parts[6]
-          probe_encoded = prefix + damaged + b'A' + suffix
-          probe = base64.b64decode(probe_encoded, validate=True)
-          decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
-          error_offset = None
-          error_text = None
-          for offset, value in enumerate(probe):
-              try:
-                  decoder.decompress(bytes((value,)))
-              except zlib.error as error:
-                  error_offset = offset
-                  error_text = str(error)
+          alphabet = b'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+          expected = '48fe49ca5fa99a67cb99a948df317a0544bbbd7f26822b2ab0270d437ce7a1b0'
+
+          archive = None
+          found = None
+          for position in range(max(0, len(damaged) - 128), len(damaged) + 1):
+              for value in alphabet:
+                  encoded = prefix + damaged[:position] + bytes((value,)) + damaged[position:] + suffix
+                  try:
+                      candidate = base64.b64decode(encoded, validate=True)
+                      gzip.decompress(candidate)
+                  except Exception:
+                      continue
+                  if hashlib.sha256(candidate).hexdigest() == expected:
+                      archive = candidate
+                      found = (position, chr(value))
+                      break
+              if archive is not None:
                   break
-          estimated_global = int((error_offset or 0) * 4 / 3)
-          estimated_local = max(0, min(len(damaged), estimated_global - len(prefix)))
-          print(f'PREFIX_BASE64_LENGTH={len(prefix)}')
-          print(f'PART05_LENGTH={len(damaged)}')
-          print(f'FIRST_DEFLATE_ERROR_BYTE={error_offset}')
-          print(f'FIRST_DEFLATE_ERROR={error_text}')
-          print(f'ESTIMATED_PART05_BASE64_OFFSET={estimated_local}')
-          raise SystemExit('Diagnostic complete; inspect the printed offset.')
+
+          if archive is None:
+              raise SystemExit('No SHA-256-valid repair found in the final 128 Base64 positions.')
+          Path('/tmp/item-quote.tgz').write_bytes(archive)
+          print(f'RECOVERED_PART05_OFFSET={found[0]}')
+          print(f'RECOVERED_PART05_CHARACTER={found[1]}')
+          print('Archive passed Base64, gzip CRC, tar, and SHA-256 validation.')
           PY
+          tar -tzf /tmp/item-quote.tgz >/dev/null
+          tar -xzf /tmp/item-quote.tgz -C .
+          rm -rf bootstrap
+
+      - name: Validate application source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f index.html
+          test -f api/index.js
+          test -f package.json
+          test -f vercel.json
+          node --check api/index.js
+          if test -f app-server.js; then node --check app-server.js; fi
+
+      - name: Commit restored application source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Build database-backed interactive quotation app"
+          git push
