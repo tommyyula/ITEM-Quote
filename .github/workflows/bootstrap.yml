@@ -1,144 +1,54 @@
-name: Bootstrap application source
+name: Diagnose source archive corruption
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'bootstrap/itemquote.v10.part*'
       - '.github/workflows/bootstrap.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  restore:
-    if: github.actor != 'github-actions[bot]'
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Recover, reconstruct, and verify source archive
+      - uses: actions/checkout@v4
+      - name: Locate the missing Base64 character
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           import base64
-          import gzip
-          import hashlib
           import zlib
 
           root = Path('bootstrap')
-          alphabet = b'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-          expected_archive = '48fe49ca5fa99a67cb99a948df317a0544bbbd7f26822b2ab0270d437ce7a1b0'
-
-          # Part 00 has one omitted byte. Its original Git blob SHA is known exactly.
-          def recover_by_git_blob(path: Path, expected_hex: str) -> bytes:
-              damaged = path.read_bytes()
-              expected = bytes.fromhex(expected_hex)
-              header = f'blob {len(damaged) + 1}\0'.encode()
-              prefix_hash = hashlib.sha1(header)
-              view = memoryview(damaged)
-              for position in range(len(damaged) + 1):
-                  suffix = view[position:]
-                  for value in alphabet:
-                      digest = prefix_hash.copy()
-                      digest.update(bytes((value,)))
-                      digest.update(suffix)
-                      if digest.digest() == expected:
-                          restored = damaged[:position] + bytes((value,)) + damaged[position:]
-                          print(f'Recovered {path.name}: inserted {chr(value)} at offset {position}.')
-                          return restored
-                  if position < len(damaged):
-                      prefix_hash.update(view[position:position + 1])
-              raise SystemExit(f'Could not recover {path.name} from its Git blob hash.')
-
           parts = [(root / f'itemquote.v10.part{i:02d}').read_bytes() for i in range(7)]
-          parts[0] = recover_by_git_blob(
-              root / 'itemquote.v10.part00',
-              'f5c0e261920fad287015edeea2c2c427c6fb2f11'
-          )
-
-          damaged = parts[5]
-          if len(damaged) != 17_999:
-              raise SystemExit(f'part05 has unexpected size {len(damaged)}')
-
+          parts[0] = parts[0][:1580] + b's' + parts[0][1580:]
           prefix = b''.join(parts[:5])
+          damaged = parts[5]
           suffix = parts[6]
-
-          # Estimate the missing Base64 position from the first gzip/deflate error.
           probe_encoded = prefix + damaged + b'A' + suffix
           probe = base64.b64decode(probe_encoded, validate=True)
           decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
           error_offset = None
+          error_text = None
           for offset, value in enumerate(probe):
               try:
                   decoder.decompress(bytes((value,)))
-              except zlib.error:
+              except zlib.error as error:
                   error_offset = offset
+                  error_text = str(error)
                   break
           estimated_global = int((error_offset or 0) * 4 / 3)
           estimated_local = max(0, min(len(damaged), estimated_global - len(prefix)))
-          print(f'Deflate error offset={error_offset}; estimated part05 Base64 offset={estimated_local}.')
-
-          checked = set()
-          def search_positions(start: int, end: int):
-              start = max(0, start)
-              end = min(len(damaged), end)
-              print(f'Searching part05 insertion offsets {start}..{end}.')
-              for position in range(start, end + 1):
-                  if position in checked:
-                      continue
-                  checked.add(position)
-                  left = damaged[:position]
-                  right = damaged[position:]
-                  for value in alphabet:
-                      repaired = left + bytes((value,)) + right
-                      encoded = prefix + repaired + suffix
-                      try:
-                          archive = base64.b64decode(encoded, validate=True)
-                      except ValueError:
-                          continue
-                      # Gzip decompression is a fast structural and CRC filter.
-                      try:
-                          gzip.decompress(archive)
-                      except Exception:
-                          continue
-                      actual = hashlib.sha256(archive).hexdigest()
-                      if actual == expected_archive:
-                          print(f'Recovered part05: inserted {chr(value)} at offset {position}.')
-                          return archive
-              return None
-
-          archive = search_positions(estimated_local - 768, estimated_local + 768)
-          if archive is None:
-              archive = search_positions(estimated_local - 6_000, estimated_local + 6_000)
-          if archive is None:
-              archive = search_positions(0, len(damaged))
-          if archive is None:
-              raise SystemExit('Unable to reconstruct archive matching gzip CRC and expected SHA-256.')
-
-          Path('/tmp/item-quote.tgz').write_bytes(archive)
-          print('Archive reconstruction, gzip validation, and SHA-256 verification succeeded.')
+          print(f'PREFIX_BASE64_LENGTH={len(prefix)}')
+          print(f'PART05_LENGTH={len(damaged)}')
+          print(f'FIRST_DEFLATE_ERROR_BYTE={error_offset}')
+          print(f'FIRST_DEFLATE_ERROR={error_text}')
+          print(f'ESTIMATED_PART05_BASE64_OFFSET={estimated_local}')
+          raise SystemExit('Diagnostic complete; inspect the printed offset.')
           PY
-          tar -tzf /tmp/item-quote.tgz >/dev/null
-          tar -xzf /tmp/item-quote.tgz -C .
-          rm -rf bootstrap
-
-      - name: Commit restored application source
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No source changes to commit."
-          else
-            git commit -m "Build database-backed interactive quotation app"
-            git push
-          fi
