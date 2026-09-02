@@ -227,4 +227,5 @@ document.getElementById('resetQuote').addEventListener('click',()=>{if(!confirm(
 document.getElementById('printBtn').addEventListener('click',()=>{if(!selected.size){alert(t('ui.noSelection'));return}const zeros=requiredZeroLines();if(zeros.length&&!confirm(interpolate('ui.zeroWarning',{n:zeros.length})+'\n\n'+t('ui.printValidation')))return;const client=(state.fields.clientCompany||'Client').trim().replace(/[^\p{L}\p{N}_-]+/gu,'_'),date=(state.fields.quoteDate||localISO()).replaceAll('-','');document.title=`ITEM_Quotation_${client}_${date}`;recalculate();window.print()});
 window.addEventListener('beforeprint',recalculate);
 syncAutoRates();applyTranslations();
-</script><script src="assets/quote-cloud.js"></script></body></html>
+</script><script>window.ITEM_QUOTE_API_URL='';/* Replace with your Vercel API origin, e.g. https://item-quote.vercel.app */</script>
+<script src="assets/quote-cloud.js"></script></body></html>

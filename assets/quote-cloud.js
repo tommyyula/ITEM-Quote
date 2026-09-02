@@ -6,7 +6,21 @@
 (() => {
   'use strict';
 
-  const API_URL = '/api/quotes';
+  function normalizeApiBase(value) {
+    if (!value) return '';
+    const candidate = String(value).trim().replace(/\/+$/, '');
+    if (!candidate) return '';
+    if (/^https?:\/\//i.test(candidate)) return candidate;
+    return '';
+  }
+
+  const API_BASE = normalizeApiBase(
+    window.ITEM_QUOTE_API_URL
+    || localStorage.getItem('itemQuoteApiUrl')
+    || new URLSearchParams(location.search).get('api')
+    || (document.querySelector('meta[name="item-quote-api"]') || {}).content
+  );
+  const API_URL = `${API_BASE || ''}/api/quotes`;
   const ADMIN_SESSION_KEY = 'itemQuoteAdminKey';
   const CLOUD_I18N = {
     en: {
@@ -203,6 +217,9 @@
   async function api(path = '', options = {}, needsAdmin = true, retried = false) {
     if (location.protocol === 'file:') throw new Error(c('fileMode'));
     const headers = new Headers(options.headers || {});
+    if (API_BASE && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      localStorage.setItem('itemQuoteApiUrl', API_BASE);
+    }
     if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
     if (needsAdmin) headers.set('X-Admin-Key', adminKey());
     let response;
@@ -257,6 +274,10 @@
     url.search = '';
     if (mode && value) url.searchParams.set(mode, value);
     history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  function appendApiToUrl(url) {
+    if (API_BASE) url.searchParams.set('api', API_BASE);
   }
 
   function applyServerQuote(quote, { readOnly = false } = {}) {
@@ -377,6 +398,7 @@
     const url = new URL(location.href);
     url.search = '';
     url.searchParams.set('share', token);
+    appendApiToUrl(url);
     return url.toString();
   }
 
@@ -384,6 +406,7 @@
     const url = new URL(location.href);
     url.search = '';
     url.searchParams.set('quote', id);
+    appendApiToUrl(url);
     return url.toString();
   }
 
@@ -486,6 +509,16 @@
   }
 
   async function loadInitial() {
+    if (new URLSearchParams(location.search).get('api')) {
+      localStorage.setItem('itemQuoteApiUrl', API_BASE);
+    }
+
+    if (location.hostname.includes('github.io') && !API_BASE) {
+      renderStatus('error', c('serverUnavailable'));
+      toast(c('serverUnavailable'), 'error');
+      return;
+    }
+
     if (location.protocol === 'file:') {
       state.fields.quoteNumber = c('autoNumber');
       const input = q('[data-field="quoteNumber"]');

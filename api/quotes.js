@@ -23,6 +23,14 @@ function header(req, name) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function setCors(req, res) {
+  const origin = header(req, 'origin');
+  res.setHeader('Access-Control-Allow-Origin', origin && /^https?:\/\//.test(origin) ? origin : '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Key');
+  res.setHeader('Vary', 'Origin');
+}
+
 function safeEqual(a, b) {
   const left = Buffer.from(String(a || ''));
   const right = Buffer.from(String(b || ''));
@@ -72,6 +80,8 @@ function getUrl(req) {
 }
 
 export default async function handler(req, res) {
+  setCors(req, res);
+
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
     res.setHeader('Allow', 'GET, POST, PATCH, DELETE, OPTIONS');

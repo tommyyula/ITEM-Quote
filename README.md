@@ -78,6 +78,16 @@ npm run generate-key
 5. Deploy. The API initializes the required sequence, table, and indexes automatically on its first database request.
 6. Verify `https://<deployment>/api/health` returns `"ok": true` and `"backend": "postgres"`.
 
+## Deploy frontend to GitHub Pages
+
+1. Keep the existing `main` branch and push repository changes.
+2. Enable GitHub Pages for this repository with **GitHub Actions** as the source (this repo includes `.github/workflows/pages.yml` and will publish the full repository content on every push to `main`).
+3. After the first Pages publish, replace the empty frontend API origin in `index.html`:
+   - edit `window.ITEM_QUOTE_API_URL` to your Vercel origin (for example `https://item-quote.vercel.app`).
+4. (Optional) use a query param to preview/share per-link API endpoint without editing HTML:
+   - append `?api=https://item-quote.vercel.app` to the URL when opening the app.
+5. Confirm you can save and open quotes, and ensure `?share=` links work end-to-end with the same API origin.
+
 ### Important
 
 - Never commit `.env`, `.env.local`, `DATABASE_URL`, or `ADMIN_KEY`.
