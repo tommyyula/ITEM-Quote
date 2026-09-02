@@ -1,0 +1,10 @@
+node_modules/
+.vercel/
+.env
+.env.local
+.env.*.local
+.data/*
+!.data/.gitkeep
+*.log
+.DS_Store
+coverage/

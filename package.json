@@ -1,0 +1,20 @@
+{
+  "name": "item-quote",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ITEM interactive quotation application with server-side persistence, unique quote numbers, update, clone, multilingual UI, and PDF export.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js",
+    "check": "node --check server.js && node --check api/quotes.js && node --check api/health.js && node --check lib/store.js && node --check lib/quote-service.js && node --check assets/quote-cloud.js",
+    "generate-key": "node scripts/generate-admin-key.js"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.0"
+  }
+}
